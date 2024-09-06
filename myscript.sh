@@ -26,8 +26,13 @@ echo "<html><head><title>NPM Install Time Report</title>" > $report_file
 echo "<style>table { width: 100%; border-collapse: collapse; }" >> $report_file
 echo "th, td { padding: 10px; text-align: left; border: 1px solid #ddd; }" >> $report_file
 echo "th { background-color: #f4f4f4; }" >> $report_file
+echo ".green { background-color: #d4edda; }" >> $report_file
+echo ".yellow { background-color: #fff3cd; }" >> $report_file
+echo ".red { background-color: #f8d7da; }" >> $report_file
 echo ".highlight { background-color: #ffdddd; }" >> $report_file
 echo "</style></head><body><h1>NPM Install Time Report</h1>" >> $report_file
+echo "<table>" >> $report_file
+echo "<tr><th>Commit</th><th>Libraries Added</th><th>Libraries Removed</th><th>Time (s)</th><th>Feedback</th></tr>" >> $report_file
 
 # Initialize the summary variables
 total_commits=0
@@ -81,6 +86,15 @@ for commit in $commits; do
     added_packages=$(comm -13 <(echo "$previous_packages") <(echo "$current_packages"))
     removed_packages=$(comm -23 <(echo "$previous_packages") <(echo "$current_packages"))
 
+    # Determine feedback color based on time
+    if (( elapsed_time <= 30 )); then
+        feedback_class="green"
+    elif (( elapsed_time <= 60 )); then
+        feedback_class="yellow"
+    else
+        feedback_class="red"
+    fi
+
     # Track the max time and associated packages
     if (( elapsed_time > max_time )); then
         max_time=$elapsed_time
@@ -89,15 +103,9 @@ for commit in $commits; do
         max_removed_packages="$removed_packages"
     fi
 
-    # Highlight the row if this commit took the most time so far
-    if [[ $commit == $max_commit ]]; then
-        echo "<tr class=\"highlight\">" >> $report_file
-    else
-        echo "<tr>" >> $report_file
-    fi
-
     # Add the row to the HTML table
-    echo "<td>$commit</td><td>$elapsed_time</td><td><pre>$added_packages</pre></td><td><pre>$removed_packages</pre></td></tr>" >> $report_file
+    echo "<tr class=\"$feedback_class\">" >> $report_file
+    echo "<td>$commit</td><td><pre>$added_packages</pre></td><td><pre>$removed_packages</pre></td><td>$elapsed_time</td><td class=\"$feedback_class\"></td></tr>" >> $report_file
 
     # Update the previous packages list
     previous_packages="$current_packages"
@@ -113,7 +121,7 @@ echo "<li>Packages added in this commit:<pre>$max_added_packages</pre></li>" >> 
 echo "<li>Packages removed in this commit:<pre>$max_removed_packages</pre></li>" >> $report_file
 echo "</ul>" >> $report_file
 
-# Finalize the HTML table
+# Finalize the HTML table and close the HTML document
 echo "</table></body></html>" >> $report_file
 
 echo "HTML report generated: $report_file"
