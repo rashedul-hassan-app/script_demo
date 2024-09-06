@@ -55,7 +55,7 @@ trap cleanup EXIT
 # Get the list of commits starting from the specified commit
 commits=$(git rev-list --reverse "$starting_commit"..HEAD)
 
-# Initialize previous package list to compare between commits
+# Initialize a variable to store the previous commit's package list
 previous_packages=""
 
 # Start processing commits
@@ -90,9 +90,15 @@ for commit in $commits; do
     # List the current packages in package.json
     current_packages=$(jq -r '.dependencies, .devDependencies | keys[]' package.json | sort)
 
+    # Initialize variables for added and removed packages
+    added_packages=""
+    removed_packages=""
+
     # Compare with the previous packages to find newly added and just removed packages
-    added_packages=$(comm -13 <(echo "$previous_packages") <(echo "$current_packages"))
-    removed_packages=$(comm -23 <(echo "$previous_packages") <(echo "$current_packages"))
+    if [ -n "$previous_packages" ]; then
+        added_packages=$(comm -13 <(echo "$previous_packages") <(echo "$current_packages"))
+        removed_packages=$(comm -23 <(echo "$previous_packages") <(echo "$current_packages"))
+    fi
 
     # Track the max time and associated packages
     if (( elapsed_time > max_time )); then
