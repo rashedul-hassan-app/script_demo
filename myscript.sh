@@ -43,20 +43,22 @@ max_commit=""
 max_added_packages=""
 max_removed_packages=""
 
+# Temporary files for comparing packages
+previous_packages_file=$(mktemp)
+current_packages_file=$(mktemp)
+
 # Function to ensure the script checks out the original branch and restores stashed changes on exit
 cleanup() {
     echo "Checking out the original branch: $original_branch"
     git checkout "$original_branch"
     echo "Applying stashed changes..."
     git stash pop || echo "No stashed changes to apply."
+    rm -f "$previous_packages_file" "$current_packages_file"
 }
 trap cleanup EXIT
 
 # Get the list of commits starting from the specified commit
 commits=$(git rev-list --reverse "$starting_commit"..HEAD)
-
-# Initialize a variable to store the previous commit's package list
-previous_packages=""
 
 # Start processing commits
 echo "<h2>Summary</h2><ul>" >> $report_file
@@ -73,6 +75,9 @@ for commit in $commits; do
     # Get the commit message
     commit_message=$(git log -1 --pretty=%B "$commit")
 
+    # Extract and sort package names from the current commit's package.json
+    jq -r '.dependencies, .devDependencies | keys[]' package.json | sort > "$current_packages_file"
+
     # Clear the npm cache and remove node_modules to ensure a fresh install
     npm cache clean --force
     rm -rf node_modules
@@ -87,17 +92,14 @@ for commit in $commits; do
     end_time=$(date +%s)
     elapsed_time=$((end_time - start_time))
 
-    # List the current packages in package.json
-    current_packages=$(jq -r '.dependencies, .devDependencies | keys[]' package.json | sort)
-
     # Initialize variables for added and removed packages
     added_packages=""
     removed_packages=""
 
     # Compare with the previous packages to find newly added and just removed packages
-    if [ -n "$previous_packages" ]; then
-        added_packages=$(comm -13 <(echo "$previous_packages") <(echo "$current_packages"))
-        removed_packages=$(comm -23 <(echo "$previous_packages") <(echo "$current_packages"))
+    if [ -s "$previous_packages_file" ]; then
+        added_packages=$(comm -13 "$previous_packages_file" "$current_packages_file")
+        removed_packages=$(comm -23 "$previous_packages_file" "$current_packages_file")
     fi
 
     # Track the max time and associated packages
@@ -112,8 +114,8 @@ for commit in $commits; do
     echo "<tr>" >> $report_file
     echo "<td>$serial_number</td><td>$commit</td><td>$commit_message</td><td><pre>$added_packages</pre></td><td><pre>$removed_packages</pre></td><td>$elapsed_time</td></tr>" >> $report_file
 
-    # Update the previous packages list
-    previous_packages="$current_packages"
+    # Move current packages to previous packages for next comparison
+    mv "$current_packages_file" "$previous_packages_file"
 
     echo "Commit $commit processed in $elapsed_time seconds."
 
