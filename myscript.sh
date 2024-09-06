@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# commit 1
 # Check if required commands are available
 if ! command -v git &> /dev/null || ! command -v npm &> /dev/null; then
     echo "git and npm are required to run this script."
