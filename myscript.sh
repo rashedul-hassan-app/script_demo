@@ -18,6 +18,10 @@ if [ -z "$starting_commit" ]; then
     starting_commit=$(git rev-list --max-parents=0 HEAD)
 fi
 
+# Stash any local changes before starting the script
+echo "Stashing local changes..."
+git stash --include-untracked
+
 # Create an HTML report file
 report_file="npm_install_report.html"
 
@@ -26,25 +30,25 @@ echo "<html><head><title>NPM Install Time Report</title>" > $report_file
 echo "<style>table { width: 100%; border-collapse: collapse; }" >> $report_file
 echo "th, td { padding: 10px; text-align: left; border: 1px solid #ddd; }" >> $report_file
 echo "th { background-color: #f4f4f4; }" >> $report_file
-echo ".green { background-color: #d4edda; }" >> $report_file
-echo ".yellow { background-color: #fff3cd; }" >> $report_file
-echo ".red { background-color: #f8d7da; }" >> $report_file
 echo ".highlight { background-color: #ffdddd; }" >> $report_file
 echo "</style></head><body><h1>NPM Install Time Report</h1>" >> $report_file
 echo "<table>" >> $report_file
-echo "<tr><th>Commit</th><th>Libraries Added</th><th>Libraries Removed</th><th>Time (s)</th><th>Feedback</th></tr>" >> $report_file
+echo "<tr><th>Serial</th><th>Commit</th><th>Commit Message</th><th>Libraries Added</th><th>Libraries Removed</th><th>Time (s)</th></tr>" >> $report_file
 
 # Initialize the summary variables
+serial_number=0
 total_commits=0
 max_time=0
 max_commit=""
 max_added_packages=""
 max_removed_packages=""
 
-# Function to ensure the script checks out the original branch on exit
+# Function to ensure the script checks out the original branch and restores stashed changes on exit
 cleanup() {
     echo "Checking out the original branch: $original_branch"
     git checkout "$original_branch"
+    echo "Applying stashed changes..."
+    git stash pop || echo "No stashed changes to apply."
 }
 trap cleanup EXIT
 
@@ -59,11 +63,15 @@ echo "<h2>Summary</h2><ul>" >> $report_file
 
 # Loop through each commit
 for commit in $commits; do
+    serial_number=$((serial_number + 1))
     total_commits=$((total_commits + 1))
     echo "Processing commit: $commit ($total_commits/$(echo "$commits" | wc -l))"
 
     # Checkout the commit
     git checkout "$commit"
+
+    # Get the commit message
+    commit_message=$(git log -1 --pretty=%B "$commit")
 
     # Clear the npm cache and remove node_modules to ensure a fresh install
     npm cache clean --force
@@ -80,20 +88,11 @@ for commit in $commits; do
     elapsed_time=$((end_time - start_time))
 
     # List the current packages in package.json
-    current_packages=$(cat package.json | jq -r '.dependencies, .devDependencies | keys[]' | sort)
+    current_packages=$(jq -r '.dependencies, .devDependencies | keys[]' package.json | sort)
 
-    # Compare with the previous packages to find added and removed packages
+    # Compare with the previous packages to find newly added and just removed packages
     added_packages=$(comm -13 <(echo "$previous_packages") <(echo "$current_packages"))
     removed_packages=$(comm -23 <(echo "$previous_packages") <(echo "$current_packages"))
-
-    # Determine feedback color based on time
-    if (( elapsed_time <= 30 )); then
-        feedback_class="green"
-    elif (( elapsed_time <= 60 )); then
-        feedback_class="yellow"
-    else
-        feedback_class="red"
-    fi
 
     # Track the max time and associated packages
     if (( elapsed_time > max_time )); then
@@ -104,8 +103,8 @@ for commit in $commits; do
     fi
 
     # Add the row to the HTML table
-    echo "<tr class=\"$feedback_class\">" >> $report_file
-    echo "<td>$commit</td><td><pre>$added_packages</pre></td><td><pre>$removed_packages</pre></td><td>$elapsed_time</td><td class=\"$feedback_class\"></td></tr>" >> $report_file
+    echo "<tr>" >> $report_file
+    echo "<td>$serial_number</td><td>$commit</td><td>$commit_message</td><td><pre>$added_packages</pre></td><td><pre>$removed_packages</pre></td><td>$elapsed_time</td></tr>" >> $report_file
 
     # Update the previous packages list
     previous_packages="$current_packages"
