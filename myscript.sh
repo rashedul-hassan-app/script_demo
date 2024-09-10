@@ -33,19 +33,14 @@ echo "th { background-color: #f4f4f4; }" >> $report_file
 echo ".highlight { background-color: #ffdddd; }" >> $report_file
 echo "</style></head><body><h1>NPM Install Time Report</h1>" >> $report_file
 echo "<table>" >> $report_file
-echo "<tr><th>Serial</th><th>Commit</th><th>Commit Message</th><th>Libraries Added</th><th>Libraries Removed</th><th>Time (s)</th></tr>" >> $report_file
+echo "<tr><th>Serial</th><th>Commit</th><th>Commit Message</th><th>Git Diff (package.json)</th><th>Time (s)</th></tr>" >> $report_file
 
 # Initialize the summary variables
 serial_number=0
 total_commits=0
 max_time=0
 max_commit=""
-max_added_packages=""
-max_removed_packages=""
-
-# Temporary files for comparing packages
-previous_packages_file=$(mktemp)
-current_packages_file=$(mktemp)
+max_git_diff=""
 
 # Function to ensure the script checks out the original branch and restores stashed changes on exit
 cleanup() {
@@ -53,7 +48,6 @@ cleanup() {
     git checkout "$original_branch"
     echo "Applying stashed changes..."
     git stash pop || echo "No stashed changes to apply."
-    rm -f "$previous_packages_file" "$current_packages_file"
 }
 trap cleanup EXIT
 
@@ -75,8 +69,8 @@ for commit in $commits; do
     # Get the commit message
     commit_message=$(git log -1 --pretty=%B "$commit")
 
-    # Extract and sort package names from the current commit's package.json
-    jq -r '.dependencies, .devDependencies | keys[]' package.json | sort > "$current_packages_file"
+    # Capture the filtered git diff of package.json
+    git_diff=$(git diff HEAD~1 HEAD -- package.json | grep '^[+-]    "' | grep -v 'package.json')
 
     # Clear the npm cache and remove node_modules to ensure a fresh install
     npm cache clean --force
@@ -92,30 +86,16 @@ for commit in $commits; do
     end_time=$(date +%s)
     elapsed_time=$((end_time - start_time))
 
-    # Initialize variables for added and removed packages
-    added_packages=""
-    removed_packages=""
-
-    # Compare with the previous packages to find newly added and just removed packages
-    if [ -s "$previous_packages_file" ]; then
-        added_packages=$(comm -13 "$previous_packages_file" "$current_packages_file")
-        removed_packages=$(comm -23 "$previous_packages_file" "$current_packages_file")
-    fi
-
-    # Track the max time and associated packages
+    # Track the max time and associated git diff
     if (( elapsed_time > max_time )); then
         max_time=$elapsed_time
         max_commit=$commit
-        max_added_packages="$added_packages"
-        max_removed_packages="$removed_packages"
+        max_git_diff="$git_diff"
     fi
 
     # Add the row to the HTML table
     echo "<tr>" >> $report_file
-    echo "<td>$serial_number</td><td>$commit</td><td>$commit_message</td><td><pre>$added_packages</pre></td><td><pre>$removed_packages</pre></td><td>$elapsed_time</td></tr>" >> $report_file
-
-    # Move current packages to previous packages for next comparison
-    mv "$current_packages_file" "$previous_packages_file"
+    echo "<td>$serial_number</td><td>$commit</td><td>$commit_message</td><td><pre>$git_diff</pre></td><td>$elapsed_time</td></tr>" >> $report_file
 
     echo "Commit $commit processed in $elapsed_time seconds."
 
@@ -124,8 +104,7 @@ done
 # Finalize the summary in the HTML report
 echo "<li>Total commits processed: $total_commits</li>" >> $report_file
 echo "<li>Commit with the longest install time: <strong>$max_commit</strong> taking <strong>$max_time seconds</strong></li>" >> $report_file
-echo "<li>Packages added in this commit:<pre>$max_added_packages</pre></li>" >> $report_file
-echo "<li>Packages removed in this commit:<pre>$max_removed_packages</pre></li>" >> $report_file
+echo "<li>Git diff of package.json for the slowest commit:<pre>$max_git_diff</pre></li>" >> $report_file
 echo "</ul>" >> $report_file
 
 # Finalize the HTML table and close the HTML document
